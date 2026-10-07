@@ -35,15 +35,11 @@ import com.example.model.DataKaryawan
 import com.example.model.DummyDataKantor
 import com.example.model.JaringanKantorManager
 import com.example.model.SessionManager
+import com.example.network.XamppApiClient
 import com.example.ui.theme.*
+import kotlinx.coroutines.launch
 
-// =========================================================================
-// 3. HALAMAN REGISTER KARYAWAN (DILENGKAPI FITUR ANTI-KECURANGAN)
-// =========================================================================
-// - Jika perangkat sudah terdaftar: Diblokir untuk mencegah titip absen/duplikasi
-// - Fitur isi otomatis: Mengambil nama/NIP terakhir yang ditulis di perangkat ini
-// - Wajib terhubung ke Jaringan Kantor Lokal untuk verifikasi data
-
+// Form registrasi identitas karyawan
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun KaryawanRegisterScreen(
@@ -53,8 +49,11 @@ fun KaryawanRegisterScreen(
 ) {
   val context = LocalContext.current
   val sessionManager = remember { SessionManager(context) }
+  val coroutineScope = rememberCoroutineScope()
   val karyawanSudahTerdaftar = remember { sessionManager.getKaryawanTerdaftar() }
+  var currentDeviceTestId by remember { mutableStateOf(sessionManager.getOrCreateDeviceTestId()) }
   var inputTerakhir by remember { mutableStateOf(sessionManager.getInputTerakhir()) }
+  var isCheckingXampp by remember { mutableStateOf(false) }
 
   // Fitur isi otomatis: nama/NIP terakhir yang ditulis di perangkat ini
   var nipInput by remember { mutableStateOf(inputTerakhir?.nip ?: "") }
@@ -339,6 +338,72 @@ fun KaryawanRegisterScreen(
           Spacer(modifier = Modifier.height(14.dp))
         }
 
+        // Kartu ID Perangkat Pengujian (Menghasilkan ID Berbeda di Tiap HP untuk NIP 19940115001)
+        Card(
+          shape = RoundedCornerShape(14.dp),
+          colors = CardDefaults.cardColors(containerColor = TealContainer.copy(alpha = 0.55f)),
+          border = BorderStroke(1.dp, TealPrimary.copy(alpha = 0.3f)),
+          modifier = Modifier
+            .fillMaxWidth()
+            .testTag("card_device_test_id")
+        ) {
+          Column(modifier = Modifier.padding(12.dp)) {
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.SpaceBetween,
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                  imageVector = Icons.Default.Badge,
+                  contentDescription = null,
+                  tint = TealDark,
+                  modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                  text = "ID Uji Perangkat: $currentDeviceTestId",
+                  fontSize = 13.sp,
+                  fontWeight = FontWeight.Bold,
+                  color = TealDark
+                )
+              }
+              TextButton(
+                onClick = {
+                  currentDeviceTestId = sessionManager.generateNewDeviceTestId()
+                },
+                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+              ) {
+                Text("Acak Baru", fontSize = 11.sp, color = TealPrimary, fontWeight = FontWeight.Bold)
+              }
+            }
+            Text(
+              text = "Mode Pengetesan: Saat memasang NIP 19940115001, setiap perangkat otomatis memakai ID berbeda ($currentDeviceTestId) agar tidak saling menimpa data di server/admin.",
+              fontSize = 11.sp,
+              color = TextDark,
+              lineHeight = 15.sp
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+              listOf("K-001", "K-002", "K-003", "K-004").forEach { presetId ->
+                FilterChip(
+                  selected = currentDeviceTestId == presetId,
+                  onClick = {
+                    currentDeviceTestId = presetId
+                    sessionManager.setDeviceTestId(presetId)
+                  },
+                  label = { Text(presetId, fontSize = 11.sp) }
+                )
+              }
+            }
+          }
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
+
         // Input NIP Karyawan
         OutlinedTextField(
           value = nipInput,
@@ -468,7 +533,6 @@ fun KaryawanRegisterScreen(
               return@Button
             }
 
-            // TODO: sambungkan ke komputer kantor (local) untuk mencocokkan data NIP
             val cleanNip = nipInput.trim()
             if (cleanNip.isEmpty()) {
               errorMessage = "Silakan masukkan NIP karyawan terlebih dahulu!"
@@ -479,24 +543,50 @@ fun KaryawanRegisterScreen(
             sessionManager.simpanInputTerakhir(cleanNip, namaInput.trim(), departemenInput.trim())
             inputTerakhir = sessionManager.getInputTerakhir()
 
-            val matchKaryawan = DummyDataKantor.daftarKaryawanResmi.find { it.nip == cleanNip }
+            coroutineScope.launch {
+              isCheckingXampp = true
+              // Verifikasi ke database server XAMPP
+              val xamppResult = XamppApiClient.cekKaryawan(cleanNip)
+              val matchKaryawan = if (xamppResult.isSuccess) {
+                xamppResult.getOrNull()
+              } else {
+                // Fallback ke master data kantor
+                DummyDataKantor.daftarKaryawanResmi.find { it.nip == cleanNip }
+              }
+              isCheckingXampp = false
 
-            if (matchKaryawan != null) {
-              // Jika nama diisi pengguna, pakai nama pengguna; jika tidak, gunakan data master kantor
-              val finalKaryawan = matchKaryawan.copy(
-                nama = if (namaInput.trim().isNotEmpty()) namaInput.trim() else matchKaryawan.nama,
-                departemen = if (departemenInput.trim().isNotEmpty()) departemenInput.trim() else matchKaryawan.departemen,
-                avatarInisial = if (namaInput.trim().isNotEmpty()) {
-                  namaInput.trim().split(" ").mapNotNull { it.firstOrNull()?.toString() }.take(2).joinToString("").uppercase()
-                } else matchKaryawan.avatarInisial
-              )
-              errorMessage = null
-              onRegisterSuccess(finalKaryawan)
-            } else {
-              // Sesuai flowchart: "Register tidak sesuai" -> kembali ke form Register
-              errorMessage = "Register tidak sesuai! NIP '$cleanNip' tidak ditemukan di database komputer kantor."
+              if (matchKaryawan != null) {
+                // Sesuai permintaan pengetesan: NIP 19940115001 memakai ID unik berbeda di tiap perangkat
+                val assignedId = if (cleanNip == "19940115001" || matchKaryawan.id == "K-001") {
+                  currentDeviceTestId
+                } else {
+                  matchKaryawan.id
+                }
+
+                val defaultNama = if (cleanNip == "19940115001") {
+                  "${matchKaryawan.nama} ($currentDeviceTestId)"
+                } else {
+                  matchKaryawan.nama
+                }
+                val finalNama = if (namaInput.trim().isNotEmpty()) namaInput.trim() else defaultNama
+
+                val finalKaryawan = matchKaryawan.copy(
+                  id = assignedId,
+                  nama = finalNama,
+                  departemen = if (departemenInput.trim().isNotEmpty()) departemenInput.trim() else matchKaryawan.departemen,
+                  avatarInisial = if (finalNama.isNotEmpty()) {
+                    finalNama.split(" ").mapNotNull { it.firstOrNull()?.toString() }.take(2).joinToString("").uppercase()
+                  } else matchKaryawan.avatarInisial
+                )
+                errorMessage = null
+                onRegisterSuccess(finalKaryawan)
+              } else {
+                val reason = xamppResult.exceptionOrNull()?.message ?: "NIP '$cleanNip' tidak ditemukan di database kantor."
+                errorMessage = "Register tidak sesuai! $reason"
+              }
             }
           },
+          enabled = !isCheckingXampp,
           shape = RoundedCornerShape(14.dp),
           colors = ButtonDefaults.buttonColors(containerColor = TealPrimary),
           modifier = Modifier
@@ -504,12 +594,26 @@ fun KaryawanRegisterScreen(
             .height(52.dp)
             .testTag("register_submit_button")
         ) {
-          Text(
-            text = "Daftarkan & Masuk",
-            fontSize = 16.sp,
-            fontWeight = FontWeight.Bold,
-            color = Color.White
-          )
+          if (isCheckingXampp) {
+            CircularProgressIndicator(
+              color = Color.White,
+              modifier = Modifier.size(18.dp),
+              strokeWidth = 2.dp
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+              text = "Memverifikasi ke Server...",
+              fontSize = 15.sp,
+              color = Color.White
+            )
+          } else {
+            Text(
+              text = "Daftarkan & Masuk",
+              fontSize = 16.sp,
+              fontWeight = FontWeight.Bold,
+              color = Color.White
+            )
+          }
         }
       }
     }

@@ -12,12 +12,13 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Badge
 import androidx.compose.material.icons.filled.Computer
+import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -35,15 +36,7 @@ import com.example.model.JaringanKantorManager
 import com.example.model.PeranPengguna
 import com.example.ui.theme.*
 
-// =========================================================================
-// 1. LAYAR UTAMA (ABSENSI KARYAWAN & AKSES ADMIN TERSEMBUNYI)
-// =========================================================================
-// Sesuai aturan flowchart:
-// "Karyawan yang sudah terdaftar langsung masuk ke Halaman Karyawan (tanpa register ulang)".
-// - Jika belum terdaftar: kartu menampilkan "Daftar Karyawan Baru"
-// - Jika sudah terdaftar: kartu menampilkan "Masuk Dashboard Karyawan" dengan nama karyawan terdaftar
-// - Dilengkapi status validasi Jaringan Kantor Lokal (Intranet & Geofencing)
-
+// Layar utama pemilihan akses
 @Composable
 fun RoleSelectionScreen(
   karyawanTerdaftar: DataKaryawan?,
@@ -53,6 +46,14 @@ fun RoleSelectionScreen(
   jaringanManager: JaringanKantorManager? = null
 ) {
   val scrollState = rememberScrollState()
+  var showXamppDialog by remember { mutableStateOf(false) }
+
+  if (showXamppDialog && jaringanManager != null) {
+    DialogPengaturanXampp(
+      jaringanManager = jaringanManager,
+      onDismiss = { showXamppDialog = false }
+    )
+  }
 
   Scaffold(
     containerColor = BgLight
@@ -185,18 +186,38 @@ fun RoleSelectionScreen(
                     )
                   }
                 }
-                OutlinedButton(
-                  onClick = { jaringanManager.toggleModeSimulasi() },
-                  shape = RoundedCornerShape(10.dp),
-                  contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                  modifier = Modifier.testTag("role_toggle_network_button")
-                ) {
-                  Text(
-                    text = if (jaringanManager.isDalamJaringanKantor) "Uji: Jauh" else "Uji: Di Kantor",
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = if (jaringanManager.isDalamJaringanKantor) TealDark else StatusRed
-                  )
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                  OutlinedButton(
+                    onClick = { showXamppDialog = true },
+                    shape = RoundedCornerShape(10.dp),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                    modifier = Modifier.testTag("role_btn_xampp_server")
+                  ) {
+                    Icon(
+                      imageVector = Icons.Default.Dns,
+                      contentDescription = null,
+                      modifier = Modifier.size(12.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                      text = "XAMPP",
+                      fontSize = 10.sp,
+                      fontWeight = FontWeight.Bold
+                    )
+                  }
+                  OutlinedButton(
+                    onClick = { jaringanManager.toggleModeSimulasi() },
+                    shape = RoundedCornerShape(10.dp),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                    modifier = Modifier.testTag("role_toggle_network_button")
+                  ) {
+                    Text(
+                      text = if (jaringanManager.isDalamJaringanKantor) "Uji: Jauh" else "Uji: Di Kantor",
+                      fontSize = 10.sp,
+                      fontWeight = FontWeight.Bold,
+                      color = if (jaringanManager.isDalamJaringanKantor) TealDark else StatusRed
+                    )
+                  }
                 }
               }
             }

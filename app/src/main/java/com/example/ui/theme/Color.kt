@@ -2,12 +2,7 @@ package com.example.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-// =========================================================================
-// KONSTANTA WARNA APLIKASI ABSENSI KANTOR
-// (Disesuaikan dengan pedoman desain: Bersih, Modern, Nyaman Satu Tangan)
-// =========================================================================
-
-// Warna Utama (Brand Teal)
+// Tema warna aplikasi absensi kantor
 val TealPrimary = Color(0xFF0B6B73)
 val TealDark = Color(0xFF0B5560)
 val TealLight = Color(0xFF1A8C94)

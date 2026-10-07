@@ -19,15 +19,13 @@ import com.example.ui.screens.*
 import com.example.ui.theme.AbsensiKantorTheme
 import com.example.ui.theme.BgLight
 
-// =========================================================================
-// ENUM RUTE NAVIGASI APLIKASI SESUAI FLOWCHART
-// =========================================================================
+// Rute navigasi halaman
 enum class LayarNavigasi {
-  PILIH_PERAN,            // Layar awal membuka aplikasi
-  LOGIN_ADMIN,            // Form Login Admin
-  DASHBOARD_ADMIN,        // Halaman Admin (standar & setelah diedit)
-  REGISTER_KARYAWAN,      // Form Register Karyawan
-  DASHBOARD_KARYAWAN      // Halaman Karyawan (sebelum & sesudah absen)
+  PILIH_PERAN,
+  LOGIN_ADMIN,
+  DASHBOARD_ADMIN,
+  REGISTER_KARYAWAN,
+  DASHBOARD_KARYAWAN
 }
 
 class MainActivity : ComponentActivity() {
@@ -57,7 +55,13 @@ fun AbsensiAppMain() {
   // Cek data karyawan yang tersimpan di perangkat
   var dataKaryawanAktif by remember {
     mutableStateOf(
-      sessionManager.getKaryawanTerdaftar() ?: DummyDataKantor.karyawanAktifDefault
+      sessionManager.getKaryawanTerdaftar() ?: run {
+        val testId = sessionManager.getOrCreateDeviceTestId()
+        DummyDataKantor.karyawanAktifDefault.copy(
+          id = testId,
+          nama = "Ahmad Fauzi ($testId)"
+        )
+      }
     )
   }
 

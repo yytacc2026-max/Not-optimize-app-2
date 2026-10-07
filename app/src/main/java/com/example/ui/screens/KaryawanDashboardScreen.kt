@@ -25,19 +25,14 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.model.*
+import com.example.network.XamppApiClient
 import com.example.ui.theme.*
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
 
-// =========================================================================
-// 4. DASHBOARD KARYAWAN
-// =========================================================================
-// FITUR KEAMANAN JARINGAN KANTOR LOKAL (GEOFENCING & NETWORK VALIDATION):
-// - Aplikasi HANYA bisa digunakan di jaringan kantor lokal (Wi-Fi / LAN kantor).
-// - Jika jauh dari kantor atau di luar jaringan: tombol absensi TERKUNCI.
-// - Data absensi harian & riwayat disimpan ke session lokal agar tidak hilang saat dibuka ulang.
-
+// Dashboard Karyawan
 enum class TabKaryawan(val label: String, val icon: ImageVector) {
   BERANDA("Beranda", Icons.Default.Home),
   RIWAYAT("Riwayat", Icons.Default.History),
@@ -56,15 +51,24 @@ fun KaryawanDashboardScreen(
   val context = LocalContext.current
   val sessionManager = remember { SessionManager(context) }
   val jManager = jaringanManager ?: remember { JaringanKantorManager(context) }
+  val coroutineScope = rememberCoroutineScope()
+  var showXamppDialog by remember { mutableStateOf(false) }
+
+  if (showXamppDialog) {
+    DialogPengaturanXampp(
+      jaringanManager = jManager,
+      onDismiss = { showXamppDialog = false }
+    )
+  }
 
   var selectedTab by remember { mutableStateOf(TabKaryawan.BERANDA) }
 
-  // State Absensi Hari Ini (dimuat dari session lokal agar tidak ter-reset hilang)
+  // State Absensi Hari Ini
   var absensiHariIni by remember {
     mutableStateOf(sessionManager.getAbsensiHariIni())
   }
 
-  // Riwayat Absensi (dimuat dari session lokal)
+  // Riwayat Absensi
   var daftarRiwayat by remember {
     mutableStateOf(sessionManager.getRiwayat())
   }
@@ -72,10 +76,7 @@ fun KaryawanDashboardScreen(
   // Pesan Notifikasi Local
   var bannerPesanLokal by remember { mutableStateOf<String?>(null) }
 
-  // =========================================================================
-  // STATE VALIDASI JARINGAN & LOKASI KANTOR LOKAL
-  // =========================================================================
-  // TODO: sambungkan ke komputer kantor (local) untuk memvalidasi SSID Wi-Fi kantor dan IP subnet LAN
+  // Validasi jaringan dan radius kantor lokal
   val isDalamJaringanKantor = jManager.isDalamJaringanKantor
   val jarakDariKantorMeter = jManager.jarakDariKantorMeter
   val radiusMaksimalKantor = jManager.radiusMaksimalKantorMeter
@@ -151,20 +152,19 @@ fun KaryawanDashboardScreen(
               jarakDariKantorMeter = jarakDariKantorMeter,
               radiusMaksimalKantor = radiusMaksimalKantor,
               onToggleSimulasiJaringan = {
-                // Toggle simulasi: Dalam kantor (15m, terhubung) vs Jauh dari kantor (1200m, terkunci)
                 jManager.toggleModeSimulasi()
               },
+              onOpenXamppSettings = {
+                showXamppDialog = true
+              },
               onAbsenMasuk = {
-                // Validasi proteksi jaringan kantor
                 if (!isDalamJaringanKantor) return@KontenBerandaKaryawan
 
-                // TODO: sambungkan ke komputer kantor (local)
                 val cal = Calendar.getInstance()
                 val jamSekarangFormat = SimpleDateFormat("HH:mm", Locale("id", "ID")).format(cal.time)
                 val jamInt = cal.get(Calendar.HOUR_OF_DAY)
                 val menitInt = cal.get(Calendar.MINUTE)
 
-                // Terlambat jika jam masuk lebih dari 08:00
                 val isTerlambat = jamInt > 8 || (jamInt == 8 && menitInt > 0)
                 val status = if (isTerlambat) StatusAbsensi.TERLAMBAT else StatusAbsensi.TEPAT_WAKTU
 
@@ -176,25 +176,34 @@ fun KaryawanDashboardScreen(
                 absensiHariIni = updatedAbsensi
                 sessionManager.simpanAbsensiHariIni(updatedAbsensi)
 
-                // Simpan ke database komputer kantor lokal untuk Dashboard Admin (akurat & real-time)
-                sessionManager.tambahAtauUpdateAbsensiKaryawan(
-                  BarisAbsensiKaryawan(
+                val baris = BarisAbsensiKaryawan(
+                  idKaryawan = karyawan.id,
+                  nama = karyawan.nama,
+                  departemen = karyawan.departemen,
+                  jamMasuk = jamSekarangFormat,
+                  jamPulang = "-",
+                  status = status
+                )
+                sessionManager.tambahAtauUpdateAbsensiKaryawan(baris)
+
+                // Sinkronisasi ke database XAMPP
+                coroutineScope.launch {
+                  XamppApiClient.kirimAbsen(
                     idKaryawan = karyawan.id,
+                    nip = karyawan.nip,
                     nama = karyawan.nama,
                     departemen = karyawan.departemen,
-                    jamMasuk = jamSekarangFormat,
-                    jamPulang = "-",
-                    status = status
+                    tipe = "MASUK",
+                    jam = jamSekarangFormat,
+                    statusAbsen = status.name
                   )
-                )
+                }
 
-                bannerPesanLokal = "Data Absen Masuk ($jamSekarangFormat) terkirim ke Komputer Kantor (Local)! Status: ${status.label}"
+                bannerPesanLokal = "Absen Masuk ($jamSekarangFormat) berhasil dicatat ke sistem! Status: ${status.label}"
               },
               onAbsenPulang = {
-                // Validasi proteksi jaringan kantor
                 if (!isDalamJaringanKantor) return@KontenBerandaKaryawan
 
-                // TODO: sambungkan ke komputer kantor (local)
                 val cal = Calendar.getInstance()
                 val jamPulangFormat = SimpleDateFormat("HH:mm", Locale("id", "ID")).format(cal.time)
 
@@ -205,19 +214,16 @@ fun KaryawanDashboardScreen(
                 absensiHariIni = updatedAbsensi
                 sessionManager.simpanAbsensiHariIni(updatedAbsensi)
 
-                // Update jam pulang di database komputer kantor lokal untuk Dashboard Admin
-                sessionManager.tambahAtauUpdateAbsensiKaryawan(
-                  BarisAbsensiKaryawan(
-                    idKaryawan = karyawan.id,
-                    nama = karyawan.nama,
-                    departemen = karyawan.departemen,
-                    jamMasuk = absensiHariIni.jamMasuk ?: "08:00",
-                    jamPulang = jamPulangFormat,
-                    status = absensiHariIni.status ?: StatusAbsensi.TEPAT_WAKTU
-                  )
+                val baris = BarisAbsensiKaryawan(
+                  idKaryawan = karyawan.id,
+                  nama = karyawan.nama,
+                  departemen = karyawan.departemen,
+                  jamMasuk = absensiHariIni.jamMasuk ?: "08:00",
+                  jamPulang = jamPulangFormat,
+                  status = absensiHariIni.status ?: StatusAbsensi.TEPAT_WAKTU
                 )
+                sessionManager.tambahAtauUpdateAbsensiKaryawan(baris)
 
-                // Simpan ke riwayat dan persistenkan ke session lokal
                 val tanggalSingkat = SimpleDateFormat("EEEE, d MMM", Locale("id", "ID")).format(cal.time)
                 val riwayatBaru = RiwayatAbsensiItem(
                   id = UUID.randomUUID().toString(),
@@ -230,7 +236,20 @@ fun KaryawanDashboardScreen(
                 daftarRiwayat = newRiwayat
                 sessionManager.simpanRiwayat(newRiwayat)
 
-                bannerPesanLokal = "Data Absen Pulang ($jamPulangFormat) terkirim ke Komputer Kantor (Local)! Absensi hari ini selesai."
+                // Sinkronisasi ke database XAMPP
+                coroutineScope.launch {
+                  XamppApiClient.kirimAbsen(
+                    idKaryawan = karyawan.id,
+                    nip = karyawan.nip,
+                    nama = karyawan.nama,
+                    departemen = karyawan.departemen,
+                    tipe = "PULANG",
+                    jam = jamPulangFormat,
+                    statusAbsen = absensiHariIni.status?.name ?: StatusAbsensi.TEPAT_WAKTU.name
+                  )
+                }
+
+                bannerPesanLokal = "Absen Pulang ($jamPulangFormat) berhasil dicatat! Presensi hari ini tuntas."
               },
               onDismissBanner = { bannerPesanLokal = null },
               bannerPesan = bannerPesanLokal
@@ -244,7 +263,6 @@ fun KaryawanDashboardScreen(
               karyawan = karyawan,
               isDalamJaringanKantor = isDalamJaringanKantor,
               onSubmitIzin = { jenis, alasan ->
-                // TODO: sambungkan ke komputer kantor (local)
                 val cal = Calendar.getInstance()
                 val tanggalSingkat = SimpleDateFormat("EEEE, d MMM", Locale("id", "ID")).format(cal.time)
                 val itemIzin = RiwayatAbsensiItem(
@@ -259,7 +277,6 @@ fun KaryawanDashboardScreen(
                 daftarRiwayat = newRiwayat
                 sessionManager.simpanRiwayat(newRiwayat)
 
-                // Simpan juga status Izin ke catatan absensi Admin
                 sessionManager.tambahAtauUpdateAbsensiKaryawan(
                   BarisAbsensiKaryawan(
                     idKaryawan = karyawan.id,
@@ -271,8 +288,18 @@ fun KaryawanDashboardScreen(
                   )
                 )
 
+                // Kirim juga ke server XAMPP
+                coroutineScope.launch {
+                  XamppApiClient.kirimIzin(
+                    idKaryawan = karyawan.id,
+                    nama = karyawan.nama,
+                    jenisIzin = jenis,
+                    alasan = alasan
+                  )
+                }
+
                 selectedTab = TabKaryawan.BERANDA
-                bannerPesanLokal = "Pengajuan izin berhasil dicatat ke komputer kantor lokal!"
+                bannerPesanLokal = "Pengajuan izin berhasil dicatat ke sistem kantor!"
               }
             )
           }
@@ -297,10 +324,7 @@ fun KaryawanDashboardScreen(
   }
 }
 
-// =========================================================================
-// SUB-KOMPOSABLE: BERANDA KARYAWAN
-// =========================================================================
-
+// Tampilan tab beranda karyawan
 @Composable
 fun KontenBerandaKaryawan(
   karyawan: DataKaryawan,
@@ -311,6 +335,7 @@ fun KontenBerandaKaryawan(
   jarakDariKantorMeter: Int,
   radiusMaksimalKantor: Int,
   onToggleSimulasiJaringan: () -> Unit,
+  onOpenXamppSettings: () -> Unit = {},
   onAbsenMasuk: () -> Unit,
   onAbsenPulang: () -> Unit,
   onDismissBanner: () -> Unit,
@@ -441,21 +466,37 @@ fun KontenBerandaKaryawan(
             }
           }
 
-          // Tombol Simulasi Pengujian (Dalam Kantor vs Jauh dari Kantor)
-          OutlinedButton(
-            onClick = onToggleSimulasiJaringan,
-            shape = RoundedCornerShape(10.dp),
-            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-            colors = ButtonDefaults.outlinedButtonColors(
-              contentColor = if (isDalamJaringanKantor) TealDark else StatusRed
-            ),
-            modifier = Modifier.testTag("toggle_network_simulation_button")
-          ) {
-            Text(
-              text = if (isDalamJaringanKantor) "Tes: Jauh" else "Tes: Di Kantor",
-              fontSize = 11.sp,
-              fontWeight = FontWeight.Bold
-            )
+          // Tombol Pengaturan Server & Simulasi
+          Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            OutlinedButton(
+              onClick = onOpenXamppSettings,
+              shape = RoundedCornerShape(10.dp),
+              contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+              modifier = Modifier.testTag("karyawan_btn_xampp_server")
+            ) {
+              Icon(
+                imageVector = Icons.Default.Dns,
+                contentDescription = null,
+                modifier = Modifier.size(12.dp)
+              )
+              Spacer(modifier = Modifier.width(4.dp))
+              Text("XAMPP", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            }
+            OutlinedButton(
+              onClick = onToggleSimulasiJaringan,
+              shape = RoundedCornerShape(10.dp),
+              contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+              colors = ButtonDefaults.outlinedButtonColors(
+                contentColor = if (isDalamJaringanKantor) TealDark else StatusRed
+              ),
+              modifier = Modifier.testTag("toggle_network_simulation_button")
+            ) {
+              Text(
+                text = if (isDalamJaringanKantor) "Tes: Jauh" else "Tes: Di Kantor",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold
+              )
+            }
           }
         }
       }
@@ -890,10 +931,7 @@ fun KontenBerandaKaryawan(
   }
 }
 
-// =========================================================================
-// KOMPONEN UI: KARTU GRADIENT
-// =========================================================================
-
+// Kartu jam digital dan status absensi hari ini
 @Composable
 fun KartuGradientAbsensi(
   absensiHariIni: AbsensiHariIni,
@@ -1190,10 +1228,7 @@ fun StatusPillBadge(status: StatusAbsensi) {
   }
 }
 
-// =========================================================================
-// SUB-KOMPOSABLE: TAB RIWAYAT LENGKAP
-// =========================================================================
-
+// Tampilan tab riwayat kehadiran
 @Composable
 fun KontenRiwayatKaryawan(daftarRiwayat: List<RiwayatAbsensiItem>) {
   LazyColumn(
@@ -1278,10 +1313,7 @@ fun KontenRiwayatKaryawan(daftarRiwayat: List<RiwayatAbsensiItem>) {
   }
 }
 
-// =========================================================================
-// SUB-KOMPOSABLE: TAB PENGAJUAN IZIN
-// =========================================================================
-
+// Tampilan tab formulir pengajuan izin
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun KontenPengajuanIzinKaryawan(
@@ -1427,10 +1459,7 @@ fun KontenPengajuanIzinKaryawan(
   }
 }
 
-// =========================================================================
-// SUB-KOMPOSABLE: TAB PROFIL KARYAWAN
-// =========================================================================
-
+// Tampilan tab profil akun karyawan
 @Composable
 fun KontenProfilKaryawan(
   karyawan: DataKaryawan,

@@ -25,15 +25,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.model.*
+import com.example.network.XamppApiClient
 import com.example.ui.theme.*
 
-// =========================================================================
-// 5. DASHBOARD ADMIN (VERSI STANDAR & VERSI SETELAH DIEDIT)
-// =========================================================================
-// DIMULAI DARI 0:
-// Seluruh metrik kehadiran (Hadir, Terlambat, Belum Absen) dan daftar absensi
-// dimulai dari 0 agar data yang masuk dari karyawan akurat dan real-time.
-
+// Dashboard Administrator untuk memantau data kehadiran
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AdminDashboardScreen(
@@ -41,15 +36,28 @@ fun AdminDashboardScreen(
 ) {
   val context = LocalContext.current
   val sessionManager = remember { SessionManager(context) }
+  val coroutineScope = rememberCoroutineScope()
 
   var configAdmin by remember { mutableStateOf(sessionManager.getKonfigurasiAdmin()) }
   var isEditModeOpen by remember { mutableStateOf(false) }
   var hasBeenEdited by remember { mutableStateOf(false) }
   var pesanLokalAdmin by remember { mutableStateOf<String?>(null) }
 
-  // Daftar absensi yang masuk hari ini (dimulai dari 0/kosong)
+  // Daftar absensi yang masuk hari ini (dimulai dari 0)
   var daftarAbsensi by remember {
     mutableStateOf(sessionManager.getAdminDaftarAbsensi())
+  }
+
+  // Sinkronisasi data dari server XAMPP jika aktif
+  LaunchedEffect(Unit) {
+    val res = XamppApiClient.getDaftarAbsensiAdmin()
+    if (res.isSuccess) {
+      val dataXampp = res.getOrNull()
+      if (!dataXampp.isNullOrEmpty()) {
+        daftarAbsensi = dataXampp
+        sessionManager.simpanAdminDaftarAbsensi(dataXampp)
+      }
+    }
   }
 
   // Menghitung metrik kehadiran secara real-time & akurat dari data absensi yang masuk
@@ -438,10 +446,7 @@ fun AdminDashboardScreen(
   }
 }
 
-// =========================================================================
-// KOMPONEN UI: KARTU METRIK ADMIN (OPTIMIZED FLAT)
-// =========================================================================
-
+// Kartu metrik kehadiran
 @Composable
 fun AdminMetricCard(
   judul: String,
@@ -497,10 +502,7 @@ fun AdminMetricCard(
   }
 }
 
-// =========================================================================
-// KOMPONEN UI: BARIS TABEL ABSENSI (OPTIMIZED SCROLL)
-// =========================================================================
-
+// Baris item absensi karyawan
 @Composable
 fun BarisTabelAbsensiCard(row: BarisAbsensiKaryawan) {
   // Pre-calculate inisial nama sekali per row agar tidak split string saat di-scroll
@@ -566,10 +568,7 @@ fun BarisTabelAbsensiCard(row: BarisAbsensiKaryawan) {
   }
 }
 
-// =========================================================================
-// DIALOG: EDIT DASHBOARD ADMIN
-// =========================================================================
-
+// Dialog konfigurasi jam kerja dan pengumuman
 @Composable
 fun EditDashboardDialog(
   configSaatIni: KonfigurasiAdminDashboard,

@@ -1,35 +1,80 @@
 package com.example.model
 
 import android.content.Context
+import android.content.SharedPreferences
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.example.network.PingResult
+import com.example.network.XamppApiClient
 
-/**MANAGER KEAMANAN JARINGAN KANTOR LOKAL (INTRANET & GEOFENCING VALIDATION)*/
+// Pengelola validasi jaringan kantor lokal dan status koneksi ke XAMPP
 class JaringanKantorManager(private val context: Context) {
-  // Batas toleransi radius kantor (meter)
+  private val prefs: SharedPreferences =
+    context.getSharedPreferences("xampp_server_config", Context.MODE_PRIVATE)
+
+  // Batas toleransi jarak radius kantor
   val radiusMaksimalKantorMeter: Int = 100
 
-  // Nama SSID Wi-Fi kantor resmi
-  val namaWifiKantor: String = "WIFI-KANTOR-LOCAL"
+  // Nama SSID Wi-Fi kantor
+  var namaWifiKantor: String by mutableStateOf("")
 
-  // IP Server lokal komputer kantor
-  val ipServerKantor: String = "192.168.1.100:8080"
+  // URL server lokal XAMPP (Apache + PHP)
+  var serverXamppUrl by mutableStateOf(
+    prefs.getString("key_xampp_url", "http://192.168.1.10/absensi_api/") ?: "http://192.168.1.10/absensi_api/"
+  )
+    private set
 
-  // Status apakah saat ini berada di dalam jaringan kantor
-  // Default: true (berada di kantor) agar penguji langsung dapat mencoba fitur absensi,
-  // dan disediakan toggle simulasi satu sentuhan untuk menguji kondisi terkunci di luar kantor.
+  // Status berada di dalam jangkauan kantor
   var isDalamJaringanKantor by mutableStateOf(true)
     private set
 
-  // Jarak perkiraan dari kantor dalam meter (15m saat di kantor, 1.200m saat jauh)
+  // Perkiraan jarak ke kantor (meter)
   var jarakDariKantorMeter by mutableIntStateOf(15)
     private set
 
-  // Status koneksi fisik perangkat ke Wi-Fi / jaringan aktif
+  // Status pengujian koneksi XAMPP
+  var isTestingKoneksi by mutableStateOf(false)
+    private set
+  var lastPingResult by mutableStateOf<PingResult?>(null)
+    private set
+
+  init {
+    XamppApiClient.setServerUrl(serverXamppUrl)
+  }
+
+  // Update alamat server lokal XAMPP
+  fun updateServerUrl(urlBaru: String) {
+    serverXamppUrl = urlBaru.trim()
+    prefs.edit().putString("key_xampp_url", serverXamppUrl).apply()
+    XamppApiClient.setServerUrl(serverXamppUrl)
+    lastPingResult = null
+  }
+
+  // Uji koneksi langsung ke server XAMPP (HTTP Ping)
+  suspend fun tesKoneksiXampp(): PingResult {
+    isTestingKoneksi = true
+    return try {
+      val result = XamppApiClient.pingServer()
+      val ping = result.getOrElse { err ->
+        PingResult(
+          isSuccess = false,
+          statusCode = 0,
+          responseTimeMs = 0,
+          message = err.localizedMessage ?: "Tidak dapat terhubung ke server XAMPP"
+        )
+      }
+      lastPingResult = ping
+      ping
+    } finally {
+      isTestingKoneksi = false
+    }
+  }
+
+  // Cek apakah perangkat terhubung ke jaringan internet/LAN
   fun isTerhubungKoneksi(): Boolean {
     val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return false
     val activeNetwork = cm.activeNetwork ?: return false
@@ -40,19 +85,19 @@ class JaringanKantorManager(private val context: Context) {
            caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
   }
 
-  // Set simulasi: Karyawan telah tiba di area kantor & terhubung ke Wi-Fi kantor
+  // Simulasi berada di kantor
   fun setMasukKantor() {
     isDalamJaringanKantor = true
     jarakDariKantorMeter = 15
   }
 
-  // Set simulasi: Karyawan berada jauh di luar kantor (aplikasi terkunci)
+  // Simulasi berada di luar jangkauan kantor
   fun setJauhDariKantor(jarakMeter: Int = 1200) {
     isDalamJaringanKantor = false
     jarakDariKantorMeter = jarakMeter
   }
 
-  // Toggle mode simulasi secara instan (untuk pengujian di emulator)
+  // Toggle simulasi lokasi untuk keperluan pengujian
   fun toggleModeSimulasi() {
     if (isDalamJaringanKantor) {
       setJauhDariKantor(1200)

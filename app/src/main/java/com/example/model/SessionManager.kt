@@ -5,19 +5,14 @@ import android.content.SharedPreferences
 import org.json.JSONArray
 import org.json.JSONObject
 
-/**
- * =========================================================================
- * SESSION MANAGER (PENYIMPANAN LOKAL IDENTITAS & ABSENSI KARYAWAN)
- * =========================================================================
- * Menyimpan status pendaftaran, data absensi hari ini, dan riwayat di lokal perangkat.
- * TODO: sambungkan ke komputer kantor (local) untuk sinkronisasi database kantor fisik.
- */
+// Penyimpanan lokal data akun dan riwayat presensi perangkat
 class SessionManager(context: Context) {
   private val prefs: SharedPreferences =
     context.getSharedPreferences("absensi_kantor_prefs", Context.MODE_PRIVATE)
 
   companion object {
     private const val KEY_FRESH_START_V1 = "key_fresh_start_v1"
+    private const val KEY_DEVICE_TEST_ID = "key_device_test_id"
     private const val KEY_SUDAH_TERDAFTAR = "key_sudah_terdaftar"
     private const val KEY_ID = "key_id"
     private const val KEY_NIP = "key_nip"
@@ -72,9 +67,41 @@ class SessionManager(context: Context) {
     return prefs.getBoolean(KEY_SUDAH_TERDAFTAR, false)
   }
 
+  // ID Perangkat Unik untuk Pengujian Multi-Device (agar NIP 19940115001 punya ID berbeda di tiap HP)
+  fun getOrCreateDeviceTestId(): String {
+    var devId = prefs.getString(KEY_DEVICE_TEST_ID, null)
+    if (devId.isNullOrEmpty()) {
+      val randomCode = (101..999).random()
+      devId = "K-$randomCode"
+      prefs.edit().putString(KEY_DEVICE_TEST_ID, devId).apply()
+    }
+    return devId
+  }
+
+  fun setDeviceTestId(customId: String) {
+    val clean = customId.trim()
+    if (clean.isNotEmpty()) {
+      prefs.edit().putString(KEY_DEVICE_TEST_ID, clean).apply()
+      if (isSudahTerdaftar()) {
+        prefs.edit().putString(KEY_ID, clean).apply()
+      }
+    }
+  }
+
+  fun generateNewDeviceTestId(): String {
+    val randomCode = (101..999).random()
+    val newId = "K-$randomCode"
+    prefs.edit().putString(KEY_DEVICE_TEST_ID, newId).apply()
+    if (isSudahTerdaftar()) {
+      prefs.edit().putString(KEY_ID, newId).apply()
+    }
+    return newId
+  }
+
   fun getKaryawanTerdaftar(): DataKaryawan? {
     if (!isSudahTerdaftar()) return null
-    val id = prefs.getString(KEY_ID, "K-001") ?: "K-001"
+    val defaultId = getOrCreateDeviceTestId()
+    val id = prefs.getString(KEY_ID, defaultId) ?: defaultId
     val nip = prefs.getString(KEY_NIP, "19940115001") ?: "19940115001"
     val nama = prefs.getString(KEY_NAMA, "Ahmad Fauzi") ?: "Ahmad Fauzi"
     val departemen = prefs.getString(KEY_DEPARTEMEN, "Teknologi") ?: "Teknologi"
@@ -166,10 +193,7 @@ class SessionManager(context: Context) {
       .apply()
   }
 
-  // =========================================================================
-  // DATA ABSENSI & METRIK ADMIN (DIMULAI DARI 0, AKURAT SESUAI AKTIVITAS)
-  // =========================================================================
-
+  // Data absensi admin
   fun getAdminDaftarAbsensi(): List<BarisAbsensiKaryawan> {
     val jsonStr = prefs.getString(KEY_ADMIN_ABSENSI_JSON, null) ?: return emptyList()
     val list = mutableListOf<BarisAbsensiKaryawan>()
@@ -253,10 +277,7 @@ class SessionManager(context: Context) {
       .apply()
   }
 
-  // =========================================================================
-  // RIWAYAT INPUT TERAKHIR DI PERANGKAT (FITUR ISI OTOMATIS PERSONAL)
-  // =========================================================================
-
+  // Riwayat input terakhir di perangkat
   fun simpanInputTerakhir(nip: String, nama: String, departemen: String) {
     if (nip.isNotBlank() || nama.isNotBlank()) {
       prefs.edit()

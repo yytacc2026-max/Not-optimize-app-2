@@ -31,13 +31,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.theme.*
 
-// =========================================================================
-// 2. HALAMAN LOGIN ADMIN
-// =========================================================================
-// Dioptimalkan untuk semua ukuran layar (HP kecil, tablet, foldable)
-// dengan scroll responsif saat keyboard muncul (imePadding) dan warna teks
-// yang selalu jelas saat mengetik (absensiTextFieldColors).
-
+// Form login operator / administrator
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AdminLoginScreen(
@@ -244,7 +238,7 @@ fun AdminLoginScreen(
         Button(
           onClick = {
             // TODO: sambungkan ke komputer kantor (local) untuk verifikasi akun admin
-            if (username.trim() == "admin" && (password == "admin123" || password == "admin")) {
+            if (username.trim() == "admin" && (password == "membersuki" || password == "admin")) {
               errorMessage = null
               onLoginSuccess()
             } else {
