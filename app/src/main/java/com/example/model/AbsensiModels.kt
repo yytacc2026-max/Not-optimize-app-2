@@ -68,6 +68,25 @@ data class KonfigurasiAdminDashboard(
   val totalBelumAbsen: Int = 0
 )
 
+data class ItemPengajuanIzinAdmin(
+  val id: Int,
+  val idKaryawan: String,
+  val nama: String,
+  val jenisIzin: String,
+  val alasan: String,
+  val tanggalDiajukan: String,
+  val statusPersetujuan: String
+)
+
+data class DashboardAdminData(
+  val config: KonfigurasiAdminDashboard,
+  val totalKaryawanMaster: Int,
+  val daftarAbsensi: List<BarisAbsensiKaryawan>,
+  val totalHadir: Int,
+  val totalTerlambat: Int,
+  val totalBelumAbsen: Int
+)
+
 object DummyDataKantor {
   // Master data karyawan resmi kantor (untuk verifikasi registrasi)
   // TODO: sambungkan ke komputer kantor (local) untuk memeriksa database pegawai

@@ -76,6 +76,20 @@ fun KaryawanDashboardScreen(
   // Pesan Notifikasi Local
   var bannerPesanLokal by remember { mutableStateOf<String?>(null) }
 
+  // Pengaturan jam kerja & pengumuman kantor yang disinkronkan dari server XAMPP
+  var configKantor by remember { mutableStateOf(sessionManager.getKonfigurasiAdmin()) }
+
+  LaunchedEffect(Unit) {
+    val resCfg = XamppApiClient.getPengaturanKantor()
+    if (resCfg.isSuccess) {
+      val cfg = resCfg.getOrNull()
+      if (cfg != null) {
+        configKantor = cfg
+        sessionManager.simpanKonfigurasiAdmin(cfg)
+      }
+    }
+  }
+
   // Validasi jaringan dan radius kantor lokal
   val isDalamJaringanKantor = jManager.isDalamJaringanKantor
   val jarakDariKantorMeter = jManager.jarakDariKantorMeter
@@ -151,6 +165,7 @@ fun KaryawanDashboardScreen(
               isDalamJaringanKantor = isDalamJaringanKantor,
               jarakDariKantorMeter = jarakDariKantorMeter,
               radiusMaksimalKantor = radiusMaksimalKantor,
+              configKantor = configKantor,
               onToggleSimulasiJaringan = {
                 jManager.toggleModeSimulasi()
               },
@@ -165,7 +180,12 @@ fun KaryawanDashboardScreen(
                 val jamInt = cal.get(Calendar.HOUR_OF_DAY)
                 val menitInt = cal.get(Calendar.MINUTE)
 
-                val isTerlambat = jamInt > 8 || (jamInt == 8 && menitInt > 0)
+                // Evaluasi status terlambat berdasarkan konfigurasi jam kantor yang disinkronkan dari admin
+                val batasParts = configKantor.batasTerlambat.split(":").mapNotNull { it.trim().toIntOrNull() }
+                val batasJam = if (batasParts.isNotEmpty()) batasParts[0] else 8
+                val batasMenit = if (batasParts.size > 1) batasParts[1] else 0
+
+                val isTerlambat = jamInt > batasJam || (jamInt == batasJam && menitInt > batasMenit)
                 val status = if (isTerlambat) StatusAbsensi.TERLAMBAT else StatusAbsensi.TEPAT_WAKTU
 
                 val updatedAbsensi = absensiHariIni.copy(
@@ -308,6 +328,7 @@ fun KaryawanDashboardScreen(
               karyawan = karyawan,
               isDalamJaringanKantor = isDalamJaringanKantor,
               jarakDariKantorMeter = jarakDariKantorMeter,
+              configKantor = configKantor,
               onLogout = onLogout,
               onResetApp = {
                 sessionManager.hapusPendaftaran()
@@ -334,6 +355,7 @@ fun KontenBerandaKaryawan(
   isDalamJaringanKantor: Boolean,
   jarakDariKantorMeter: Int,
   radiusMaksimalKantor: Int,
+  configKantor: KonfigurasiAdminDashboard = KonfigurasiAdminDashboard(),
   onToggleSimulasiJaringan: () -> Unit,
   onOpenXamppSettings: () -> Unit = {},
   onAbsenMasuk: () -> Unit,
@@ -623,6 +645,71 @@ fun KontenBerandaKaryawan(
               )
             }
           }
+        }
+      }
+    }
+
+    // KARTU PENGUMUMAN & JAM KERJA KANTOR (DISINKRONKAN DARI ADMIN SEMUA DEVICE)
+    item(key = "karyawan_announcement_card") {
+      Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = CardWhite),
+        border = BorderStroke(1.dp, BorderMuted),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        modifier = Modifier
+          .fillMaxWidth()
+          .testTag("karyawan_announcement_card")
+      ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+              Icon(
+                imageVector = Icons.Default.Campaign,
+                contentDescription = null,
+                tint = TealPrimary,
+                modifier = Modifier.size(18.dp)
+              )
+              Spacer(modifier = Modifier.width(6.dp))
+              Text(
+                text = "Pengumuman Kantor",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                color = TextDark
+              )
+            }
+            Box(
+              modifier = Modifier
+                .clip(RoundedCornerShape(6.dp))
+                .background(TealContainer)
+                .padding(horizontal = 6.dp, vertical = 2.dp)
+            ) {
+              Text(
+                text = "${configKantor.jamMasukKerja} - ${configKantor.jamPulangKerja} WIB",
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                color = TealDark
+              )
+            }
+          }
+
+          Spacer(modifier = Modifier.height(6.dp))
+          Text(
+            text = configKantor.pengumuman,
+            fontSize = 12.sp,
+            color = TextDark,
+            lineHeight = 16.sp
+          )
+          Spacer(modifier = Modifier.height(4.dp))
+          Text(
+            text = "Batas Toleransi Terlambat: Pukul ${configKantor.batasTerlambat} WIB",
+            fontSize = 11.sp,
+            color = StatusAmber,
+            fontWeight = FontWeight.Medium
+          )
         }
       }
     }
@@ -1465,6 +1552,7 @@ fun KontenProfilKaryawan(
   karyawan: DataKaryawan,
   isDalamJaringanKantor: Boolean,
   jarakDariKantorMeter: Int,
+  configKantor: KonfigurasiAdminDashboard = KonfigurasiAdminDashboard(),
   onLogout: () -> Unit,
   onResetApp: () -> Unit
 ) {
@@ -1519,7 +1607,7 @@ fun KontenProfilKaryawan(
         HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = BorderMuted)
         BarisInfoProfil("NIP", karyawan.nip)
         HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = BorderMuted)
-        BarisInfoProfil("Jam Kerja Kantor", "08:00 - 17:00 WIB")
+        BarisInfoProfil("Jam Kerja Kantor", "${configKantor.jamMasukKerja} - ${configKantor.jamPulangKerja} WIB (Batas: ${configKantor.batasTerlambat})")
         HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = BorderMuted)
         BarisInfoProfil("Status Jaringan", if (isDalamJaringanKantor) "Terhubung ke LAN Kantor ($jarakDariKantorMeter m)" else "Di Luar Jangkauan ($jarakDariKantorMeter m)")
         HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = BorderMuted)
